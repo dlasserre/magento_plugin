@@ -1,0 +1,22 @@
+{
+  "name": "astaross/magento-order",
+  "description": "Enables thunderstone orders",
+  "type": "magento2-module",
+  "license": "proprietary",
+  "config": {
+    "sort-packages": true
+  },
+  "version": "1.0.1",
+  "require": {
+    "php": "^7.3.0"
+  },
+  "autoload": {
+    "files": [
+      "registration.php"
+    ],
+    "psr-4": {
+      "Thunderstone\\Order\\": ""
+    }
+  }
+}
+
