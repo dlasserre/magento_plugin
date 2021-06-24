@@ -1,5 +1,5 @@
 {
-  "name": "thunderstone/magento-order",
+  "name": "astaross/magento-order",
   "description": "Enables thunderstone orders",
   "type": "magento2-module",
   "license": "proprietary",
