@@ -56,13 +56,13 @@ class OrderController implements OrderControllerInterface
     /**
      * @param Context $context
      * @param StoreManagerInterface $storeManager
-     * @param ProductRepositoryInterface $productRepository
+     * @param Interceptor $productRepository
      * @param FormKey $formkey
      * @param QuoteFactory $quote ,
      * @param QuoteManagement $quoteManagement
      * @param CustomerFactory $customerFactory ,
      * @param CustomerRepositoryInterface $customerRepository
-     * @param OrderService $orderService,
+     * @param OrderService $orderService ,
      */
     public function __construct(
         Context $context,
@@ -96,26 +96,27 @@ class OrderController implements OrderControllerInterface
     public function createOrder(Order $order)
     {
         $store = $this->storeManager->getStore();
-        $websiteId = $this->storeManager->getStore()->getWebsiteId();
-        $customer = $this->customerFactory->create();
-        $customer->setWebsiteId($websiteId);
 
         $objectManager = ObjectManager::getInstance();
-        $customer = $objectManager->get('\Magento\Customer\Api\CustomerRepositoryInterface')->get($order->getCustomer()->getEmail());
 
-        if(!$customer->getId()){
+        try{
+            $customer = $objectManager->get('\Magento\Customer\Api\CustomerRepositoryInterface')->get($order->getCustomer()->getEmail());
+        }
+        catch (NoSuchEntityException $exception){
             $customer = $this->customerFactory->create();
             $customer->setWebsiteId($this->storeManager->getStore()->getWebsiteId());
             $customer->setStoreId($store->getId());
-            $customer->setFirstname($order->getCustomer()->getFirstname());
+            $customer->setFirstname('[TS]: '.$order->getCustomer()->getFirstname());
             $customer->setLastname($order->getCustomer()->getLastname());
             $customer->setEmail($order->getCustomer()->getEmail());
+            $customer->save();
+            $customer = $this->customerRepository->getById($customer->getEntityId());
         }
 
-        $quoteFactory = $objectManager->get('\Magento\Quote\Model\QuoteFactory')->create(); //Create object of quote
-        $quoteFactory->setStore($store); //set store for which you create quote
-        $quoteFactory->setCurrency();
-        $quoteFactory->assignCustomer($customer); //Assign quote to customer
+        $quote = $objectManager->get('\Magento\Quote\Model\QuoteFactory')->create(); //Create object of quote
+        $quote->setStore($store); //set store for which you create quote
+        $quote->setCurrency();
+        $quote->assignCustomer($customer); //Assign quote to customer
 
         $address = [
             'country_id' => 'FR',
@@ -129,22 +130,21 @@ class OrderController implements OrderControllerInterface
             'shipping_method' => 'flat_rate'
         ];
 
-        $quoteFactory->getBillingAddress()->addData($address);
-        $quoteFactory->getShippingAddress()->addData($address);
+        $quote->getBillingAddress()->addData($address);
+        $quote->getShippingAddress()->addData($address);
 
         //add items in quote
         foreach($order->getProducts() as $product){
-            $quoteFactory->addProduct(
+            $quote->addProduct(
                 $objectManager->get('\Magento\Catalog\Model\ProductRepository')->get($product->getSku()),
                 $product->getQuantity()
             );
         }
 
-        $quoteFactory->getShippingAddress()->setCollectShippingRates(true);
-        $quoteFactory->getShippingAddress()->collectShippingRates();
+        $quote->getShippingAddress()->setCollectShippingRates(true);
+        $quote->getShippingAddress()->collectShippingRates();
 
-        $shippingQuoteRate = $objectManager->get('\Magento\Quote\Model\Shipping');
-        $quoteFactory->getShippingAddress()->setShippingMethod('flatrate_flatrate');
+        $quote->getShippingAddress()->setShippingMethod('flatrate_flatrate');
         //$quoteFactory->getShippingAddress()->addShippingRate($shippingQuoteRate);
 
         /**
@@ -159,18 +159,18 @@ class OrderController implements OrderControllerInterface
             ->collectShippingRates()
             ->setShippingMethod('freeshipping_freeshipping'); //shipping method
          * */
-        $quoteFactory->setPaymentMethod('checkmo'); //payment method
-        $quoteFactory->setInventoryProcessed(true); //not effect inventory
-        $quoteFactory->save(); //Now Save quote and your quote is ready
+        $quote->setPaymentMethod('checkmo'); //payment method
+        $quote->setInventoryProcessed(true); //not effect inventory
+        $quote->save(); //Now Save quote and your quote is ready
 
         // Set Sales Order Payment
-        $quoteFactory->getPayment()->importData(['method' => 'checkmo']);
+        $quote->getPayment()->importData(['method' => 'checkmo']);
 
         // Collect Totals & Save Quote
-        $quoteFactory->collectTotals()->save();
+        $quote->collectTotals()->save();
 
         // Create Order From Quote
-        $order = $this->quoteManagement->submit($quoteFactory);
+        $order = $this->quoteManagement->submit($quote);
 
         $order->setEmailSent(0);
         $increment_id = $order->getRealOrderId();
