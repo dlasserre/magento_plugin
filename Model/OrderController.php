@@ -93,7 +93,7 @@ class OrderController implements OrderControllerInterface
      *
      * @throws LocalizedException
      */
-    public function createOrder(Order $order)
+    public function createOrder(Order $order): array
     {
         $store = $this->storeManager->getStore();
 
@@ -106,7 +106,7 @@ class OrderController implements OrderControllerInterface
             $customer = $this->customerFactory->create();
             $customer->setWebsiteId($this->storeManager->getStore()->getWebsiteId());
             $customer->setStoreId($store->getId());
-            $customer->setFirstname('[TS]: '.$order->getCustomer()->getFirstname());
+            $customer->setFirstname($order->getCustomer()->getFirstname());
             $customer->setLastname($order->getCustomer()->getLastname());
             $customer->setEmail($order->getCustomer()->getEmail());
             $customer->save();
@@ -118,20 +118,8 @@ class OrderController implements OrderControllerInterface
         $quote->setCurrency();
         $quote->assignCustomer($customer); //Assign quote to customer
 
-        $address = [
-            'country_id' => 'FR',
-            'street' => '5 rue de paris',
-            'city' => 'Paris',
-            'firstname' => 'Jean',
-            'lastname' => 'Dupond',
-            'telephone' => '0102030405',
-            'postcode' => '75001',
-            'method' => 'free',
-            'shipping_method' => 'flat_rate'
-        ];
-
-        $quote->getBillingAddress()->addData($address);
-        $quote->getShippingAddress()->addData($address);
+        $quote->getBillingAddress()->addData($order->getShipping()->getAddress());
+        $quote->getShippingAddress()->addData($order->getShipping()->getAddress());
 
         //add items in quote
         foreach($order->getProducts() as $product){
@@ -144,7 +132,12 @@ class OrderController implements OrderControllerInterface
         $quote->getShippingAddress()->setCollectShippingRates(true);
         $quote->getShippingAddress()->collectShippingRates();
 
-        $quote->getShippingAddress()->setShippingMethod('flatrate_flatrate');
+        if(!is_null($method = $order->getShipping()->getMethod())){
+            $quote->getShippingAddress()->setShippingMethod($method);
+        }
+        else{
+            $quote->getShippingAddress()->setShippingMethod('thunderstone_thunderstone');
+        }
         //$quoteFactory->getShippingAddress()->addShippingRate($shippingQuoteRate);
 
         /**
@@ -165,7 +158,6 @@ class OrderController implements OrderControllerInterface
 
         // Set Sales Order Payment
         $quote->getPayment()->importData(['method' => 'checkmo']);
-
         // Collect Totals & Save Quote
         $quote->collectTotals()->save();
 
@@ -173,13 +165,23 @@ class OrderController implements OrderControllerInterface
         $order = $this->quoteManagement->submit($quote);
 
         $order->setEmailSent(0);
-        $increment_id = $order->getRealOrderId();
         if($order->getEntityId()){
-            $result['order_id']= $order->getRealOrderId();
-        }else{
-            $result=['error'=>1,'msg'=>'Your custom message'];
+            return [
+                'response' => [
+                    'success' => true,
+                    'order_id' => $order->getRealOrderId()
+                ]
+            ];
         }
-        return $result;
+        else
+        {
+            return [
+                'response' => [
+                    'success' => false,
+                    'error'=> 'Error while processing the order'
+                ]
+            ];
+        }
     }
 
     /**
@@ -203,13 +205,6 @@ class OrderController implements OrderControllerInterface
                 ]
             ];
         }
-        $this->createOrder($order);
-        return [
-            [
-                'status' => [
-                    'success' => true
-                ]
-            ]
-        ];
+        return $this->createOrder($order);
     }
 }

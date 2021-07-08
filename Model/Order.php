@@ -12,6 +12,11 @@ class Order
     private $customer;
 
     /**
+     * @var \Thunderstone\Order\Model\Shipping
+     */
+    private $shipping;
+
+    /**
      * @var \Thunderstone\Order\Model\Product[]
      */
     private $products;
@@ -30,6 +35,22 @@ class Order
     public function setCustomer(\Thunderstone\Order\Model\Customer $customer): void
     {
         $this->customer = $customer;
+    }
+
+    /**
+     * @return \Thunderstone\Order\Model\Shipping
+     */
+    public function getShipping(): \Thunderstone\Order\Model\Shipping
+    {
+        return $this->shipping;
+    }
+
+    /**
+     * @param \Thunderstone\Order\Model\Shipping $shipping
+     */
+    public function setShipping(\Thunderstone\Order\Model\Shipping $shipping): void
+    {
+        $this->shipping = $shipping;
     }
 
     /**
