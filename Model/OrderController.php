@@ -133,6 +133,7 @@ class OrderController implements OrderControllerInterface
         $quote->getShippingAddress()->collectShippingRates();
 
         if(!is_null($method = $order->getShipping()->getMethod())){
+            var_dump($method);
             $quote->getShippingAddress()->setShippingMethod($method);
         }
         else{
@@ -152,12 +153,12 @@ class OrderController implements OrderControllerInterface
             ->collectShippingRates()
             ->setShippingMethod('freeshipping_freeshipping'); //shipping method
          * */
-        $quote->setPaymentMethod('checkmo'); //payment method
+        $quote->setPaymentMethod('thunderstone'); //payment method
         $quote->setInventoryProcessed(true); //not effect inventory
         $quote->save(); //Now Save quote and your quote is ready
 
         // Set Sales Order Payment
-        $quote->getPayment()->importData(['method' => 'checkmo']);
+        $quote->getPayment()->importData(['method' => 'thunderstone']);
         // Collect Totals & Save Quote
         $quote->collectTotals()->save();
 

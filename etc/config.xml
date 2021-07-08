@@ -11,5 +11,16 @@
                 <model>Thunderstone\Order\Model\ThunderstoneShipping</model>
             </thunderstone>
         </carriers>
+        <payment>
+            <thunderstone>
+                <payment_action>authorize</payment_action>
+                <active>1</active>
+                <model>Thunderstone\Order\Model\ThunderstonePayment</model>
+                <order_status>pending</order_status>
+                <title>Thunderstone Payment</title>
+                <allowspecific>0</allowspecific>
+                <group>Thunderstone</group>
+            </thunderstone>
+        </payment>
     </default>
 </config>
