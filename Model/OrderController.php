@@ -4,6 +4,7 @@ namespace Thunderstone\Order\Model;
 
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Model\Product\Interceptor;
+use Magento\Catalog\Model\ProductRepository;
 use Magento\Customer\Api\CustomerRepositoryInterface;
 use Magento\Customer\Model\CustomerFactory;
 use Magento\Framework\App\Helper\Context;
@@ -14,6 +15,7 @@ use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\QuoteFactory;
 use Magento\Quote\Model\QuoteManagement;
+use Magento\Quote\Model\QuoteRepository;
 use Magento\Sales\Model\Service\OrderService;
 use Magento\Store\Model\StoreManagerInterface;
 use Thunderstone\Order\Api\OrderControllerInterface;
@@ -27,7 +29,7 @@ class OrderController implements OrderControllerInterface
     /**
      * @var ProductRepositoryInterface
      */
-    private $productRepository;
+    private $productInterceptor;
     /**
      * @var FormKey
      */
@@ -35,7 +37,7 @@ class OrderController implements OrderControllerInterface
     /**
      * @var Quote
      */
-    private $quote;
+    private $quoteFactory;
     /**
      * @var QuoteManagement
      */
@@ -56,29 +58,29 @@ class OrderController implements OrderControllerInterface
     /**
      * @param Context $context
      * @param StoreManagerInterface $storeManager
-     * @param Interceptor $productRepository
+     * @param Interceptor $productInterceptor
      * @param FormKey $formkey
-     * @param QuoteFactory $quote ,
+     * @param QuoteFactory $quoteFactory
      * @param QuoteManagement $quoteManagement
-     * @param CustomerFactory $customerFactory ,
+     * @param CustomerFactory $customerFactory
      * @param CustomerRepositoryInterface $customerRepository
-     * @param OrderService $orderService ,
+     * @param OrderService $orderService
      */
     public function __construct(
         Context $context,
         StoreManagerInterface $storeManager,
-        Interceptor $productRepository,
+        Interceptor $productInterceptor,
         FormKey $formkey,
-        QuoteFactory $quote,
+        QuoteFactory $quoteFactory,
         QuoteManagement $quoteManagement,
         CustomerFactory $customerFactory,
         CustomerRepositoryInterface $customerRepository,
         OrderService $orderService
     ) {
         $this->storeManager = $storeManager;
-        $this->productRepository = $productRepository;
+        $this->productInterceptor = $productInterceptor;
         $this->formkey = $formkey;
-        $this->quote = $quote;
+        $this->quoteFactory = $quoteFactory;
         $this->quoteManagement = $quoteManagement;
         $this->customerFactory = $customerFactory;
         $this->customerRepository = $customerRepository;
@@ -96,11 +98,11 @@ class OrderController implements OrderControllerInterface
     public function createOrder(Order $order): array
     {
         $store = $this->storeManager->getStore();
-
         $objectManager = ObjectManager::getInstance();
+        $errors = [];
 
         try{
-            $customer = $objectManager->get('\Magento\Customer\Api\CustomerRepositoryInterface')->get($order->getCustomer()->getEmail());
+            $customer = $this->customerRepository->get($order->getCustomer()->getEmail());
         }
         catch (NoSuchEntityException $exception){
             $customer = $this->customerFactory->create();
@@ -109,68 +111,80 @@ class OrderController implements OrderControllerInterface
             $customer->setFirstname($order->getCustomer()->getFirstname());
             $customer->setLastname($order->getCustomer()->getLastname());
             $customer->setEmail($order->getCustomer()->getEmail());
-            $customer->save();
+            $this->customerRepository->save($customer);
             $customer = $this->customerRepository->getById($customer->getEntityId());
         }
 
-        $quote = $objectManager->get('\Magento\Quote\Model\QuoteFactory')->create(); //Create object of quote
-        $quote->setStore($store); //set store for which you create quote
+        $quoteRepository = $objectManager->get(QuoteRepository::class);
+
+        $quote = $this->quoteFactory->create();
+        $quote->setStore($store);
         $quote->setCurrency();
-        $quote->assignCustomer($customer); //Assign quote to customer
+        $quote->assignCustomer($customer);
 
         $quote->getBillingAddress()->addData($order->getShipping()->getAddress());
         $quote->getShippingAddress()->addData($order->getShipping()->getAddress());
 
-        //add items in quote
+        $productRepository = $objectManager->get(ProductRepository::class);
         foreach($order->getProducts() as $product){
-            $quote->addProduct(
-                $objectManager->get('\Magento\Catalog\Model\ProductRepository')->get($product->getSku()),
-                $product->getQuantity()
-            );
+            try{
+                $quote->addProduct(
+                    $productRepository->get($product->getSku()),
+                    $product->getQuantity()
+                );
+            }
+            catch (NoSuchEntityException $exception) {
+                $errors[] = [
+                    'type' => 'product not found',
+                    'info' => $product->getSku()
+                ];
+            }
         }
 
         $quote->getShippingAddress()->setCollectShippingRates(true);
         $quote->getShippingAddress()->collectShippingRates();
 
         if(!is_null($method = $order->getShipping()->getMethod())){
-            var_dump($method);
             $quote->getShippingAddress()->setShippingMethod($method);
         }
         else{
             $quote->getShippingAddress()->setShippingMethod('thunderstone_thunderstone');
         }
-        //$quoteFactory->getShippingAddress()->addShippingRate($shippingQuoteRate);
+
+        $quote->setPaymentMethod('thunderstone');
+        $quote->setInventoryProcessed(true);
+
+
+        $quoteRepository->save($quote);
+
+        $quote->getPayment()->importData(['method' => 'thunderstone']);
+        $quote->collectTotals();
+        $quoteRepository->save($quote);
+
+        $order = $this->quoteManagement->submit($quote);
+        $order->setState(\Magento\Sales\Model\Order::STATE_COMPLETE)->setStatus(\Magento\Sales\Model\Order::STATE_COMPLETE);
+        $order->setEmailSent(0);
+        $order->setTotalPaid($order->getTotalDue());
+        $objectManager->get('\Magento\Sales\Api\OrderRepositoryInterface')->save($order);
 
         /**
-        //Set Address to quote
-        $quote->getBillingAddress()->addData($orderData['shipping_address']);
-        $quote->getShippingAddress()->addData($orderData['shipping_address']);
-
-        // Collect Rates and Set Shipping & Payment Method
-
-        $shippingAddress = $quote->getShippingAddress();
-        $shippingAddress->setCollectShippingRates(true)
-            ->collectShippingRates()
-            ->setShippingMethod('freeshipping_freeshipping'); //shipping method
+        $invoice = $objectManager->get(InvoiceFactory::class)->create();
+        $invoice->setOrder($order);
+        $invoice->setRequestCaptureCase(Invoice::CAPTURE_OFFLINE);
+        $invoice->setItems($order->getItems());
+        $invoice->register();
+        $invoice->capture();
+        $invoice->pay();
+        $objectManager->get(InvoiceRepository::class)->save($invoice);
          * */
-        $quote->setPaymentMethod('thunderstone'); //payment method
-        $quote->setInventoryProcessed(true); //not effect inventory
-        $quote->save(); //Now Save quote and your quote is ready
 
-        // Set Sales Order Payment
-        $quote->getPayment()->importData(['method' => 'thunderstone']);
-        // Collect Totals & Save Quote
-        $quote->collectTotals()->save();
-
-        // Create Order From Quote
-        $order = $this->quoteManagement->submit($quote);
-
-        $order->setEmailSent(0);
         if($order->getEntityId()){
             return [
                 'response' => [
                     'success' => true,
-                    'order_id' => $order->getRealOrderId()
+                    'message' => 'ok',
+                    'order_id' => $order->getRealOrderId(),
+                    'errors' => $errors
                 ]
             ];
         }
@@ -179,7 +193,8 @@ class OrderController implements OrderControllerInterface
             return [
                 'response' => [
                     'success' => false,
-                    'error'=> 'Error while processing the order'
+                    'message'=> 'Error while processing the order',
+                    'errors' => $errors
                 ]
             ];
         }
@@ -187,22 +202,21 @@ class OrderController implements OrderControllerInterface
 
     /**
      * {@inheritdoc}
-     */
-    public function getOrder(string $orderId): string
-    {
-        return 'Here is the order id: '.$orderId;
-    }
-
-    /**
-     * {@inheritdoc}
+     * @throws LocalizedException
      */
     public function postOrder(Order $order): array
     {
         if(!$order->isValid()){
             return [
                 [
-                    'status' => 'ko',
-                    'message' => 'order is not valid'
+                    'success' => false,
+                    'message' => 'order is not valid',
+                    'errors' => [
+                        [
+                            'type' => 'invalid order',
+                            'info' => 'invalid order'
+                        ]
+                    ]
                 ]
             ];
         }

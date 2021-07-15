@@ -4,21 +4,34 @@
 namespace Thunderstone\Order\Model;
 
 
+use Magento\Directory\Helper\Data as DirectoryHelper;
+use Magento\Framework\Api\AttributeValueFactory;
+use Magento\Framework\Api\ExtensionAttributesFactory;
 use Magento\Framework\App\Config\ScopeConfigInterface;
+use Magento\Framework\App\ObjectManager;
+use Magento\Framework\Data\Collection\AbstractDb;
 use Magento\Framework\DataObject;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\Model\AbstractExtensibleModel;
+use Magento\Framework\Model\Context;
+use Magento\Framework\Model\ResourceModel\AbstractResource;
+use Magento\Framework\Registry;
+use Magento\Payment\Api\Data\PaymentMethodInterface;
+use Magento\Payment\Helper\Data;
 use Magento\Payment\Model\InfoInterface;
+use Magento\Payment\Model\Method\Logger;
 use Magento\Payment\Model\MethodInterface;
+use Magento\Payment\Observer\AbstractDataAssignObserver;
 use Magento\Quote\Api\Data\CartInterface;
-use Magento\Payment\Model\Method\Adapter;
-use Magento\Framework\Locale\Resolver;
+use Magento\Sales\Model\Order\Payment;
 
-class ThunderstonePayment implements MethodInterface
+class ThunderstonePayment extends AbstractExtensibleModel implements MethodInterface, PaymentMethodInterface
 {
     
     /**
      * @var string
      */
-    private $code = 'thunderstone';
+    protected $code = 'thunderstone';
 
     /**
      * @var int
@@ -26,218 +39,605 @@ class ThunderstonePayment implements MethodInterface
     private $storeId;
 
     /**
+     * @var string
+     */
+    protected $formBlockType = \Magento\Payment\Block\Form::class;
+
+    /**
+     * @var string
+     */
+    protected $infoBlockType = \Magento\Payment\Block\Info::class;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $isGateway = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $isOffline = true;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canOrder = true;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canAuthorize = true;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canCapture = true;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canCapturePartial = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canCaptureOnce = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canRefund = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canRefundInvoicePartial = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canVoid = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canUseInternal = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canUseCheckout = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $isInitializeNeeded = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canFetchTransactionInfo = false;
+
+    /**
+     * Payment Method feature
+     *
+     * @var bool
+     */
+    protected $canReviewPayment = false;
+
+    /**
+     * This may happen when amount is captured, but not settled
+     * @var bool
+     */
+    protected $canCancelInvoice = false;
+
+    /**
+     * Fields that should be replaced in debug with '***'
+     *
+     * @var array
+     */
+    protected $debugReplacePrivateDataKeys = [];
+
+    /**
+     * Payment data
+     *
+     * @var Data
+     */
+    protected $paymentData;
+
+    /**
+     * Core store config
+     *
+     * @var ScopeConfigInterface
+     */
+    protected $scopeConfig;
+
+    /**
+     * @var Logger
+     */
+    protected $logger;
+
+    /**
+     * @var DirectoryHelper
+     */
+    private $directory;
+
+    /**
      * @var string|null
      */
     private $title = 'Thunderstone Payment';
 
-    public function getCode()
+    /**
+     * @param Context $context
+     * @param Registry $registry
+     * @param ExtensionAttributesFactory $extensionFactory
+     * @param AttributeValueFactory $customAttributeFactory
+     * @param Data $paymentData
+     * @param ScopeConfigInterface $scopeConfig
+     * @param Logger $logger
+     * @param AbstractResource|null $resource
+     * @param AbstractDb|null $resourceCollection
+     * @param array $data
+     * @param DirectoryHelper|null $directory
+     * @SuppressWarnings(PHPMD.ExcessiveParameterList)
+     */
+    public function __construct(
+        Context $context,
+        Registry $registry,
+        ExtensionAttributesFactory $extensionFactory,
+        AttributeValueFactory $customAttributeFactory,
+        Data $paymentData,
+        ScopeConfigInterface $scopeConfig,
+        Logger $logger,
+        AbstractResource $resource = null,
+        AbstractDb $resourceCollection = null,
+        array $data = [],
+        DirectoryHelper $directory = null
+    ) {
+        parent::__construct(
+            $context,
+            $registry,
+            $extensionFactory,
+            $customAttributeFactory,
+            $resource,
+            $resourceCollection,
+            $data
+        );
+        $this->paymentData = $paymentData;
+        $this->scopeConfig = $scopeConfig;
+        $this->logger = $logger;
+        $this->directory = $directory ?: ObjectManager::getInstance()->get(DirectoryHelper::class);
+        $this->initializeData($data);
+    }
+
+    public function getCode(): string
     {
         return $this->code;
     }
 
-    public function getTitle()
+    public function getTitle(): ?string
     {
         return $this->title;
     }
 
     public function setStore($storeId)
     {
+        $this->setData('store', (int)$storeId);
         $this->storeId = $storeId;
     }
 
-    public function getStore()
+    public function getStore(): int
     {
         return $this->storeId;
     }
 
-    public function getFormBlockType()
+    public function getFormBlockType(): string
     {
-        var_dump('ploop');
-        return 'page/html';
+        return $this->formBlockType;
     }
 
-    public function canOrder()
+    public function getInfoBlockType(): string
+    {
+        return $this->infoBlockType;
+    }
+
+    public function canOrder(): bool
+    {
+        return $this->canOrder;
+    }
+
+    public function canAuthorize(): bool
+    {
+        return $this->canAuthorize;
+    }
+
+    public function canCapture(): bool
+    {
+        return $this->canCapture;
+    }
+
+    public function canCapturePartial(): bool
+    {
+        return $this->canCapturePartial;
+    }
+
+    public function canCaptureOnce(): bool
+    {
+        return $this->canCaptureOnce;
+    }
+
+    public function canRefund(): bool
+    {
+        return $this->canRefund;
+    }
+
+    public function canRefundPartialPerInvoice(): bool
+    {
+        return $this->canRefundInvoicePartial;
+    }
+
+    public function canVoid(): bool
+    {
+        return $this->canVoid;
+    }
+
+    public function canUseInternal(): bool
+    {
+        return $this->canUseInternal;
+    }
+
+    public function canUseCheckout(): bool
+    {
+        return $this->canUseCheckout;
+    }
+
+    public function canEdit(): bool
+    {
+        return false;
+    }
+
+    public function canFetchTransactionInfo(): bool
+    {
+        return $this->canFetchTransactionInfo;
+    }
+
+    public function fetchTransactionInfo(InfoInterface $payment, $transactionId): array
+    {
+        return [];
+    }
+
+    public function isGateway(): bool
+    {
+        return $this->isGateway;
+    }
+
+    public function isOffline(): bool
+    {
+        return $this->isOffline;
+    }
+
+    public function isInitializeNeeded(): bool
+    {
+        return $this->isInitializeNeeded;
+    }
+
+    public function canUseForCountry($country): bool
+    {
+        /*
+       for specific country, the flag will set up as 1
+       */
+        if ($this->getConfigData('allowspecific') == 1) {
+            $availableCountries = explode(',', $this->getConfigData('specificcountry'));
+            if (!in_array($country, $availableCountries)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public function canUseForCurrency($currencyCode): bool
     {
         return true;
     }
 
-    public function canAuthorize()
+    public function getInfoInstance(): InfoInterface
     {
-        // TODO: Implement canAuthorize() method.
-    }
-
-    public function canCapture()
-    {
-        // TODO: Implement canCapture() method.
-    }
-
-    public function canCapturePartial()
-    {
-        // TODO: Implement canCapturePartial() method.
-    }
-
-    public function canCaptureOnce()
-    {
-        // TODO: Implement canCaptureOnce() method.
-    }
-
-    public function canRefund()
-    {
-        // TODO: Implement canRefund() method.
-    }
-
-    public function canRefundPartialPerInvoice()
-    {
-        // TODO: Implement canRefundPartialPerInvoice() method.
-    }
-
-    public function canVoid()
-    {
-        // TODO: Implement canVoid() method.
-    }
-
-    public function canUseInternal()
-    {
-        // TODO: Implement canUseInternal() method.
-    }
-
-    public function canUseCheckout()
-    {
-        // TODO: Implement canUseCheckout() method.
-    }
-
-    public function canEdit()
-    {
-        // TODO: Implement canEdit() method.
-    }
-
-    public function canFetchTransactionInfo()
-    {
-        // TODO: Implement canFetchTransactionInfo() method.
-    }
-
-    public function fetchTransactionInfo(InfoInterface $payment, $transactionId)
-    {
-        // TODO: Implement fetchTransactionInfo() method.
-    }
-
-    public function isGateway()
-    {
-        // TODO: Implement isGateway() method.
-    }
-
-    public function isOffline()
-    {
-        // TODO: Implement isOffline() method.
-    }
-
-    public function isInitializeNeeded()
-    {
-        // TODO: Implement isInitializeNeeded() method.
-    }
-
-    public function canUseForCountry($country)
-    {
-        // TODO: Implement canUseForCountry() method.
-    }
-
-    public function canUseForCurrency($currencyCode)
-    {
-        // TODO: Implement canUseForCurrency() method.
-    }
-
-    public function getInfoBlockType()
-    {
-        return \Magento\Payment\Block\Form::class;
-    }
-
-    public function getInfoInstance()
-    {
-        // TODO: Implement getInfoInstance() method.
+        $instance = $this->getData('info_instance');
+        if (!$instance instanceof InfoInterface) {
+            throw new LocalizedException(
+                __('We cannot retrieve the payment information object instance.')
+            );
+        }
+        return $instance;
     }
 
     public function setInfoInstance(InfoInterface $info)
     {
-        // TODO: Implement setInfoInstance() method.
+        $this->setData('info_instance', $info);
     }
 
-    public function validate()
+    public function validate(): ThunderstonePayment
     {
-        // TODO: Implement validate() method.
+        /**
+         * to validate payment method is allowed for billing country or not
+         */
+        $paymentInfo = $this->getInfoInstance();
+        if ($paymentInfo instanceof Payment) {
+            $billingCountry = $paymentInfo->getOrder()->getBillingAddress()->getCountryId();
+        } else {
+            $billingCountry = $paymentInfo->getQuote()->getBillingAddress()->getCountryId();
+        }
+        $billingCountry = $billingCountry ?: $this->directory->getDefaultCountry();
+
+        if (!$this->canUseForCountry($billingCountry)) {
+            throw new LocalizedException(
+                __('You can\'t use the payment type you selected to make payments to the billing country.')
+            );
+        }
+
+        return $this;
     }
 
-    public function order(InfoInterface $payment, $amount)
+    /**
+     * @throws LocalizedException
+     */
+    public function order(InfoInterface $payment, $amount): ThunderstonePayment
     {
-        // TODO: Implement order() method.
+        if (!$this->canOrder()) {
+            throw new LocalizedException(__('The order action is not available.'));
+        }
+        return $this;
     }
 
-    public function authorize(InfoInterface $payment, $amount)
+    /**
+     * @throws LocalizedException
+     */
+    public function authorize(InfoInterface $payment, $amount): ThunderstonePayment
     {
-        // TODO: Implement authorize() method.
+        if (!$this->canAuthorize()) {
+            throw new LocalizedException(__('The authorize action is not available.'));
+        }
+        return $this;
     }
 
-    public function capture(InfoInterface $payment, $amount)
+    /**
+     * @throws LocalizedException
+     */
+    public function capture(InfoInterface $payment, $amount): ThunderstonePayment
     {
-        // TODO: Implement capture() method.
+        if (!$this->canCapture()) {
+            throw new LocalizedException(__('The capture action is not available.'));
+        }
+
+        return $this;
     }
 
-    public function refund(InfoInterface $payment, $amount)
+    /**
+     * @throws LocalizedException
+     */
+    public function refund(InfoInterface $payment, $amount): ThunderstonePayment
     {
-        // TODO: Implement refund() method.
+        if (!$this->canRefund()) {
+            throw new LocalizedException(__('The refund action is not available.'));
+        }
+        return $this;
     }
 
-    public function cancel(InfoInterface $payment)
+    public function cancel(InfoInterface $payment): ThunderstonePayment
     {
-        // TODO: Implement cancel() method.
+        return $this;
     }
 
-    public function void(InfoInterface $payment)
+    /**
+     * @throws LocalizedException
+     */
+    public function void(InfoInterface $payment): ThunderstonePayment
     {
-        // TODO: Implement void() method.
+        if (!$this->canVoid()) {
+            throw new LocalizedException(__('The void action is not available.'));
+        }
+        return $this;
     }
 
-    public function canReviewPayment()
+    public function canReviewPayment(): bool
     {
-        // TODO: Implement canReviewPayment() method.
+        return $this->canReviewPayment;
     }
 
-    public function acceptPayment(InfoInterface $payment)
+    public function acceptPayment(InfoInterface $payment): bool
     {
-        // TODO: Implement acceptPayment() method.
+        if (!$this->canReviewPayment()) {
+            throw new LocalizedException(__('The payment review action is unavailable.'));
+        }
+        return false;
     }
 
-    public function denyPayment(InfoInterface $payment)
+    public function denyPayment(InfoInterface $payment): bool
     {
-        // TODO: Implement denyPayment() method.
+        if (!$this->canReviewPayment()) {
+            throw new LocalizedException(__('The payment review action is unavailable.'));
+        }
+        return false;
     }
 
     public function getConfigData($field, $storeId = null)
     {
-        // TODO: Implement getConfigData() method.
+        if ('order_place_redirect_url' === $field) {
+            return $this->getConfigPaymentAction();
+        }
+        if (null === $storeId) {
+            $storeId = $this->getStore();
+        }
+        $path = 'payment/' . $this->getCode() . '/' . $field;
+        return $this->scopeConfig->getValue($path, \Magento\Store\Model\ScopeInterface::SCOPE_STORE, $storeId);
+
     }
 
-    public function assignData(DataObject $data)
+    /**
+     * @throws LocalizedException
+     */
+    public function assignData(DataObject $data): ThunderstonePayment
     {
-        // TODO: Implement assignData() method.
+        $this->_eventManager->dispatch(
+            'payment_method_assign_data_' . $this->getCode(),
+            [
+                AbstractDataAssignObserver::METHOD_CODE => $this,
+                AbstractDataAssignObserver::MODEL_CODE => $this->getInfoInstance(),
+                AbstractDataAssignObserver::DATA_CODE => $data
+            ]
+        );
+
+        $this->_eventManager->dispatch(
+            'payment_method_assign_data',
+            [
+                AbstractDataAssignObserver::METHOD_CODE => $this,
+                AbstractDataAssignObserver::MODEL_CODE => $this->getInfoInstance(),
+                AbstractDataAssignObserver::DATA_CODE => $data
+            ]
+        );
+
+        return $this;
     }
 
-    public function isAvailable(CartInterface $quote = null)
+    public function isAvailable(CartInterface $quote = null): bool
     {
-        return true;
+        if (!$this->isActive($quote ? $quote->getStoreId() : null)) {
+            return false;
+        }
+
+        $checkResult = new DataObject();
+        $checkResult->setData('is_available', true);
+
+        // for future use in observers
+        $this->_eventManager->dispatch(
+            'payment_method_is_active',
+            [
+                'result' => $checkResult,
+                'method_instance' => $this,
+                'quote' => $quote
+            ]
+        );
+
+        return $checkResult->getData('is_available');
     }
 
-    public function isActive($storeId = null)
+    public function isActive($storeId = null): bool
     {
-        return true;
+        return (bool)(int)$this->getConfigData('active', $storeId);
     }
 
-    public function initialize($paymentAction, $stateObject)
+    public function initialize($paymentAction, $stateObject): ThunderstonePayment
     {
-        // TODO: Implement initialize() method.
+       return $this;
     }
 
-    public function getConfigPaymentAction()
+    public function getConfigPaymentAction(): string
     {
-        // TODO: Implement getConfigPaymentAction() method.
+        return $this->getConfigData('payment_action');
+    }
+
+    /**
+     * Log debug data to file
+     *
+     * @param array $debugData
+     * @return void
+     * @deprecated 100.2.0
+     */
+    protected function _debug(array $debugData)
+    {
+        $this->logger->debug(
+            $debugData,
+            $this->getDebugReplacePrivateDataKeys(),
+            $this->getDebugFlag()
+        );
+    }
+
+    /**
+     * Define if debugging is enabled
+     *
+     * @return bool
+     * @SuppressWarnings(PHPMD.BooleanGetMethodName)
+     * @api
+     * @deprecated 100.2.0
+     */
+    public function getDebugFlag(): bool
+    {
+        return (bool)(int)$this->getConfigData('debug');
+    }
+
+    /**
+     * Used to call debug method from not Payment Method context
+     *
+     * @param mixed $debugData
+     * @return void
+     * @api
+     * @deprecated 100.2.0
+     */
+    public function debugData($debugData)
+    {
+        $this->_debug($debugData);
+    }
+
+    /**
+     * Return replace keys for debug data
+     *
+     * @return array
+     * @deprecated 100.2.0
+     */
+    public function getDebugReplacePrivateDataKeys(): array
+    {
+        return (array) $this->debugReplacePrivateDataKeys;
+    }
+
+    public function getStoreId(): int
+    {
+        return $this->getStore();
+    }
+
+    public function getIsActive(): bool
+    {
+        return $this->isActive();
+    }
+
+
+    /**
+     * Initializes injected data
+     *
+     * @param array $data
+     * @return void
+     */
+    protected function initializeData(array $data = [])
+    {
+        if (!empty($data['formBlockType'])) {
+            $this->formBlockType = $data['formBlockType'];
+        }
     }
 }
