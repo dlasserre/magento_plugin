@@ -16,6 +16,8 @@ use Magento\Quote\Model\Quote;
 use Magento\Quote\Model\QuoteFactory;
 use Magento\Quote\Model\QuoteManagement;
 use Magento\Quote\Model\QuoteRepository;
+use Magento\Sales\Model\Order\InvoiceRepository;
+use Magento\Sales\Model\Service\InvoiceService;
 use Magento\Sales\Model\Service\OrderService;
 use Magento\Store\Model\StoreManagerInterface;
 use Thunderstone\Order\Api\OrderControllerInterface;
@@ -167,16 +169,10 @@ class OrderController implements OrderControllerInterface
         $order->setTotalPaid($order->getTotalDue());
         $objectManager->get('\Magento\Sales\Api\OrderRepositoryInterface')->save($order);
 
-        /**
-        $invoice = $objectManager->get(InvoiceFactory::class)->create();
-        $invoice->setOrder($order);
-        $invoice->setRequestCaptureCase(Invoice::CAPTURE_OFFLINE);
-        $invoice->setItems($order->getItems());
-        $invoice->register();
-        $invoice->capture();
+        $invoice = $objectManager->get(InvoiceService::class)->prepareInvoice($order);
         $invoice->pay();
         $objectManager->get(InvoiceRepository::class)->save($invoice);
-         * */
+
 
         if($order->getEntityId()){
             return [
