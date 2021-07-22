@@ -254,7 +254,7 @@ class ThunderstonePayment extends AbstractExtensibleModel implements MethodInter
         $this->storeId = $storeId;
     }
 
-    public function getStore(): int
+    public function getStore(): ?int
     {
         return $this->storeId;
     }
