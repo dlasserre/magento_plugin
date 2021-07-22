@@ -9,7 +9,7 @@
   "version": "1.0.0",
   "require": {
     "php": "^7.1.0",
-    "magento/product-community-edition": "2.3.0",
+    "magento/product-community-edition": "^2.3.0",
     "ext-json": "*"
   },
   "autoload": {
