@@ -6,9 +6,16 @@ use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Model\Product\Interceptor;
 use Magento\Catalog\Model\ProductRepository;
 use Magento\Customer\Api\AddressRepositoryInterface;
+use Magento\Customer\Api\Data\GroupInterfaceFactory;
 use Magento\Customer\Model\AddressFactory;
 use Magento\Customer\Api\CustomerRepositoryInterface;
 use Magento\Customer\Model\CustomerFactory;
+use Magento\Customer\Api\GroupRepositoryInterface;
+use Magento\Customer\Model\GroupFactory;
+use Magento\Customer\Model\ResourceModel\GroupRepository;
+use Magento\Framework\Api\Filter;
+use Magento\Framework\Api\Search\FilterGroup;
+use Magento\Framework\Api\Search\SearchCriteria;
 use Magento\Framework\App\Helper\Context;
 use Magento\Framework\App\ObjectManager;
 use Magento\Framework\Data\Form\FormKey;
@@ -104,6 +111,27 @@ class OrderController implements OrderControllerInterface
         $store = $this->storeManager->getStore();
         $objectManager = ObjectManager::getInstance();
         $errors = [];
+        $groupRepository = $objectManager->get(GroupRepositoryInterface::class);
+        $groupFilter = new Filter();
+        $groupFilter->setField('customer_group_code')
+            ->setValue('Thunderstone')
+            ->setConditionType('like');
+        $searchGroupCriteria = new SearchCriteria();
+        $groupFilterGroup = new FilterGroup();
+        $groupFilterGroup->setFilters([$groupFilter]);
+        $searchGroupCriteria->setFilterGroups([$groupFilterGroup]);
+        $groupResults = $groupRepository->getList($searchGroupCriteria);
+        if($groupResults->getTotalCount() > 0)
+        {
+            $customerGroup = $groupResults->getItems()[0];
+        }
+        else
+        {
+            $customerGroup = $objectManager->get(GroupInterfaceFactory::class)->create();
+            $customerGroup->setCode('Thunderstone Group');
+            $customerGroup->setTaxClassId(GroupRepository::DEFAULT_TAX_CLASS_ID);
+            $customerGroup = $groupRepository->save($customerGroup);
+        }
 
         try{
             $customer = $this->customerRepository->get($order->getCustomer()->getEmail());
@@ -115,6 +143,8 @@ class OrderController implements OrderControllerInterface
             $customer->setFirstname($order->getCustomer()->getFirstname());
             $customer->setLastname($order->getCustomer()->getLastname());
             $customer->setEmail($order->getCustomer()->getEmail());
+            $customer->setGroupId($customerGroup->getId());
+
             $customer = $this->customerRepository->save($customer->getDataModel());
 
             $address = $objectManager->get(AddressFactory::class)->create();
