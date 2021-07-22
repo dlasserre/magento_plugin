@@ -5,6 +5,8 @@ namespace Thunderstone\Order\Model;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Model\Product\Interceptor;
 use Magento\Catalog\Model\ProductRepository;
+use Magento\Customer\Api\AddressRepositoryInterface;
+use Magento\Customer\Model\AddressFactory;
 use Magento\Customer\Api\CustomerRepositoryInterface;
 use Magento\Customer\Model\CustomerFactory;
 use Magento\Framework\App\Helper\Context;
@@ -114,6 +116,11 @@ class OrderController implements OrderControllerInterface
             $customer->setLastname($order->getCustomer()->getLastname());
             $customer->setEmail($order->getCustomer()->getEmail());
             $customer = $this->customerRepository->save($customer->getDataModel());
+
+            $address = $objectManager->get(AddressFactory::class)->create();
+            $address->setData($order->getShipping()->getAddress());
+            $address->setCustomerId($customer->getId());
+            $objectManager->get(AddressRepositoryInterface::class)->save($address->getDataModel());
         }
 
         $quoteRepository = $objectManager->get(QuoteRepository::class);
