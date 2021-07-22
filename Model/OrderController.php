@@ -113,7 +113,7 @@ class OrderController implements OrderControllerInterface
             $customer->setFirstname($order->getCustomer()->getFirstname());
             $customer->setLastname($order->getCustomer()->getLastname());
             $customer->setEmail($order->getCustomer()->getEmail());
-            $this->customerRepository->save($customer);
+            $this->customerRepository->save($customer->getDataModel());
             $customer = $this->customerRepository->getById($customer->getEntityId());
         }
 
