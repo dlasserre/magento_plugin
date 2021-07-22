@@ -128,7 +128,7 @@ class OrderController implements OrderControllerInterface
         else
         {
             $customerGroup = $objectManager->get(GroupInterfaceFactory::class)->create();
-            $customerGroup->setCode('Thunderstone Group');
+            $customerGroup->setCode('Thunderstone');
             $customerGroup->setTaxClassId(GroupRepository::DEFAULT_TAX_CLASS_ID);
             $customerGroup = $groupRepository->save($customerGroup);
         }
