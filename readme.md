@@ -1,10 +1,10 @@
 add to composer.json's repositories:<br>
 {
 "type": "vcs",
-"url": "git@github.com:Astaross/magento-order.git"
+"url": "git@github.com:dlasserre/magento_plugin.git"
 }<br>
 
-php -d memory_limit=1 /usr/local/bin/composer require astaross/magento-order
+php -d memory_limit=-1 /usr/local/bin/composer require dlasserre/magento_plugin
 
 check for module status:<br>
 bin/magento module:status Thunderstone_Order
